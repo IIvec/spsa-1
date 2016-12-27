@@ -69,10 +69,15 @@ my $VAR_NAME      = 0; # Name
 my $VAR_START     = 1; # Start Value (theta_0)
 my $VAR_MIN       = 2; # Minimum allowed value
 my $VAR_MAX       = 3; # Maximum allowed value
-my $VAR_C         = 4; # c
-my $VAR_A         = 5; # a
+my $VAR_C_END     = 4; # c in the last iteration
+my $VAR_R_END     = 5; # R in the last iteration. R = a / c ^ 2.
 my $VAR_SIMUL_ELO = 6; # Simulation: Elo loss from 0 (optimum) to +-100)
 my $VAR_END       = 7; # Nothing
+
+# Extra calculated COLUMNS (SPSA paramters)
+my $VAR_C         = 7; # c
+my $VAR_A_END     = 8; # a in the last iteration
+my $VAR_A         = 9; # a
 
 ### SECTION. Variable definitions. (Static data during execution)
 my @variables;
@@ -85,11 +90,6 @@ local (*LOG);
 my $shared_lock      :shared;
 my $shared_iter      :shared; # Iteration counter
 my %shared_theta     :shared; # Current values by variable name
-my %var_temp         :shared; # Current values by variable name at a-c update
-my %var_prog1        :shared; # Progress after A iterations
-my %var_prog2        :shared; # Progress after next A iterations
-my %var_a            :shared; # Current a
-my %var_c            :shared; # Current c 
 
 ### SECTION. Helper functions
 
@@ -132,11 +132,17 @@ sub read_csv
         die "Invalid current: '$row->[$VAR_START]'"           if ($row->[$VAR_START]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid max: '$row->[$VAR_MAX]'"                 if ($row->[$VAR_MAX]       !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid min: '$row->[$VAR_MIN]'"                 if ($row->[$VAR_MIN]       !~ /^[-+]?[0-9]*\.?[0-9]+$/);
-        die "Invalid c end: '$row->[$VAR_C]'"            
-if ($row->[$VAR_C]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
-        die "Invalid a end: '$row->[$VAR_A]'"           
-if ($row->[$VAR_A]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
+        die "Invalid c end: '$row->[$VAR_C_END]'"             if ($row->[$VAR_C_END]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
+        die "Invalid r end: '$row->[$VAR_R_END]'"             if ($row->[$VAR_R_END]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid simul ELO: '$row->[$VAR_SIMUL_ELO]'"     if ($row->[$VAR_SIMUL_ELO] !~ /^[-+]?[0-9]*\.?[0-9]+$/);
+    }
+
+    # STEP. Calculate SPSA parameters for each variable.
+    foreach $row (@variables)
+    {
+        $row->[$VAR_C]       = $row->[$VAR_C_END] * $iterations ** $gamma; 
+        $row->[$VAR_A_END]   = $row->[$VAR_R_END] * $row->[$VAR_C_END] ** 2;
+        $row->[$VAR_A]       = $row->[$VAR_A_END] * ($A + $iterations) ** $alpha;
     }
 
     # STEP. Create variable index for easy access.
@@ -150,12 +156,7 @@ if ($row->[$VAR_A]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
     
     foreach $row (@variables)
     {
-        $shared_theta{$row->[$VAR_NAME]} = $row->[$VAR_START]; 
-        $var_temp{$row->[$VAR_NAME]} = $row->[$VAR_START];    
-        $var_prog1{$row->[$VAR_NAME]} = 0.0;    
-        $var_prog2{$row->[$VAR_NAME]} = 0.0;
-        $var_a{$row->[$VAR_NAME]} = $row->[$VAR_A];
-        $var_c{$row->[$VAR_NAME]} = $row->[$VAR_C];
+        $shared_theta{$row->[$VAR_NAME]} = $row->[$VAR_START];    
     }
 
     # STEP. Launch SPSA threads
@@ -208,15 +209,15 @@ sub run_spsa
     engine_init() if (!$simulate);
 
     while(1)
-    { 
+    {
         # SPSA coefficients indexed by variable.
-    my (%var_value, %var_min, %var_max, %var_delta, %var_eng1, %var_eng2);
-    my $iter;  
+        my (%var_value, %var_min, %var_max, %var_a, %var_c, %var_R, %var_delta, %var_eng1, %var_eng2);
+        my $iter; 
 
         {
              lock($shared_lock);
 
-             # STEP. Increase the shared iteration counter
+             # STEP. Increase the shared interation counter
              if (++$shared_iter > $iterations)
              {
                  engine_quit() if (!$simulate);
@@ -233,26 +234,15 @@ sub run_spsa
                  $var_value{$name}  = $shared_theta{$name};
                  $var_min{$name}    = $row->[$VAR_MIN];
                  $var_max{$name}    = $row->[$VAR_MAX];
-
-                 if ($iter == $A + 1){
-                      $var_prog1{$name} = abs($var_value{$name} - $var_temp{$name});
-                      $var_temp{$name} = $var_value{$name};
-                 }
-
-                 if ($iter > $A + 1 && ($iter - 1) % $A == 0){
-                      $var_prog2{$name} = abs($var_value{$name} - $var_temp{$name});
-                      $var_a{$name} = ($var_prog1{$name} > 0.001 ? max($alpha, $var_a{$name} * sqrt($var_prog2{$name} / $var_prog1{$name})): $var_a{$name});
-                      $var_c{$name} = ($var_prog1{$name} > 0.001 ? max($gamma, $var_c{$name} * sqrt($var_prog2{$name} / $var_prog1{$name})): $var_c{$name});
-                      $var_prog1{$name} = $var_prog2{$name};
-                      $var_temp{$name} = $var_value{$name};            
-                 }
-
+                 $var_a{$name}      = $row->[$VAR_A] / ($A + $iter) ** $alpha;
+                 $var_c{$name}      = $row->[$VAR_C] / $iter ** $gamma;
+                 $var_R{$name}      = $var_a{$name} / $var_c{$name} ** 2;
                  $var_delta{$name}  = int(rand(2)) ? 1 : -1;
 
                  $var_eng1{$name} = min(max($var_value{$name} + $var_c{$name} * $var_delta{$name}, $var_min{$name}), $var_max{$name});
                  $var_eng2{$name} = min(max($var_value{$name} - $var_c{$name} * $var_delta{$name}, $var_min{$name}), $var_max{$name});
 
-                 print "Iteration: $iter, variable: $name, value: $var_value{$name}, a: $var_a{$name}, c: $var_c{$name}\n";
+                 print "Iteration: $iter, variable: $name, value: $var_value{$name}, a: $var_a{$name}, c: $var_c{$name}, R: $var_R{$name}\n";
              }
         }
 
@@ -269,7 +259,7 @@ sub run_spsa
             {
                 my $name = $row->[$VAR_NAME];
 
-                $shared_theta{$name} += $var_a{$name} * $result / ($var_c{$name} * $var_delta{$name});
+                $shared_theta{$name} += $var_R{$name} * $var_c{$name} * $result / $var_delta{$name};
                 $shared_theta{$name} = max(min($shared_theta{$name}, $var_max{$name}), $var_min{$name});
                 
                 $logLine .= ",$shared_theta{$name}";
