@@ -1,12 +1,12 @@
 0. License
 ==========
 
-SPSA Tuner is free software: you can redistribute it and/or modify
+SCSPSA Tuner is a free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 
-SPSA Tuner is distributed in the hope that it will be useful,
+SCSPSA Tuner is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
@@ -14,16 +14,18 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-1. Introduction to SPSA
-========================
+1. Introduction to SPSA / SCSPSA
+================================
 
 Please see the following document (by James C. Spall) as an introduction to SPSA.
 http://www.jhuapl.edu/spsa/PDF-SPSA/Spall_Implementation_of_the_Simultaneous.PDF
 
 Unless otherwise stated, we follow the naming conventions and recommendations of the article. 
 
-2. Modifications for chess engine testing
-=========================================
+SCSPSA is self-correcting version od SPSA, introduced by I. Ivec in 2017.
+
+2. Modifications for chess engine testing (in SCSPSA)
+=====================================================
 
 Please see matlab pseudocode by Spall (document, p. 821) as a starting point.
 
@@ -42,23 +44,39 @@ If engine 1 (= thetaplus) wins, it returns 1.
 If engine 2 (= thetaminus) wins, it returns -1.
 If game is drawn, it returns 0.
 
-For engine testing it makes sense to define a new varible "relative apply factor" Rk:
-Rk := ak / ck^2.
-
-It's interpretation is following:
+An update is done by the command:
 
 theta := theta + ak * ghat
 <=>
 theta := theta + ak * match(thetaplus, thetaminus) / (ck * delta)
-<=>
-theta := theta + Rk * ck * match(thetaplus, thetaminus) / delta
 
-Instead of trying to find ideal values for ak, we can try to find an ideal value for Rk.
+SCSPSA starts with constant value for ak, and then try to adjust it after 2A, 3A, 4A, ... iterations (see parameter A in aggr.conf). You can experiment, but I recommend to start with A = N / 8, where N is total number of iterations.
+
+SCSPSA tries to recognize whether theta is approaching an optimum in desired number of iterations. If progress is too fast, SCSPSA assumes that theta is far away from an optimum, and tries to increase ak further (by at most 25% to handle statistical errors). If progress is too slow, SCSPSA assumes that theta is close to an optimum, and decreases ak (by at most 25%).
+
+A good starting point for ak is given by the formula:
+
+ak = 2 * theta0 * theta0 / N,
+
+whera theta0 is initial value for theta, while N is total number of iterations.
+
+ck values will first decrease, and then increase by:
+
+ck = c0 * exp(2 * k / N) / sqrt(k),
+
+to fight against statistical errors and to avoid oscillations around an optimum. In CSV-file (see below) we prescribe "ck" for the last iteration and a good guess is given by the formula:
+
+ck = theta0 / 4.
+
+If theta0 is close to zero, make your own guess, or try to rescale it. 
+
+This way, SCSPSA tries to be both GLOBAL tuner and LOCAL tuner.
+Of course, for fine local tuning one needs big number of iterations.
 
 3. Configuration file
 =====================
 
-To execute script 'spsa.pl', you need an INI style configuration file.
+To execute script 'scspsa.pl', you need an INI style configuration file (aggr.conf).
 Take a look at example files provided. All options should be self-explanatory.
 
 4. Variables CSV-file
@@ -72,12 +90,11 @@ Column 1: Variable initial value (float)
 Column 2: Variable minimum value (float)
 Column 3: Variable maximum value (float)
 Column 4: Perturbation "ck" for the last iteration (float)
-Column 5: Relative apply factor "Rk" for the last iteration (float)
-Column 6: For simulation mode, this defines the ELO decrease for point x = (+/-) 100 compared to point x = 0 (optimum) (float).
+Column 5: Initial apply factor "ak" (float)
+Column 6: use 0.0 (simulation mode do not work so far).
 
 Notes: 
-- When ck is defined for the last iteration and the number of iterations is known, it's easy to derive a value for c.
-- When ck and Rk are defined for the last iterations, it's easy to derive ak for the last iteration. Based on that we can derive value for a.
+- When ck is defined for the last iteration and the number of iterations is known, it's easy to derive a value for ck for any iteration.
 
 5. Getting Started
 ==================
@@ -93,18 +110,17 @@ Notes:
 
 - Modify stockfish to make parameters available via UCI. Copy the modified stockfish in the same directory with the script.
 - Create a config file (just modify 'aggr.conf' slightly) and variable file (just modify 'aggr.var' and add more lines)
-- Kick off the tuning by executing: spsa.pl [configFile]
+- Kick off the tuning by executing: scspsa.pl [configFile]
+  (for instance: scspsa.pl aggr.conf)
+
+A tunable Stockfish file that works with provided example files is a part of this branch.
 
 6. Practical Guidelines
 =======================
 
-To be able to successfully use SPSA for tuning, one needs to determine good values for coefficients ck and Rk.
-In most cases, it's impossible to determine ideal values. 
-For evaluation related parameters, we've had success with the following values:
-Rk for the last iteration (CSV-file, column 5): 0.002
-ck for the last iteration (CSV-file, column 4): 4 centipawns (= 8 in Stockfish's internal scale)
+To be able to successfully use SCSPSA for tuning, one needs to determine good values for coefficients ck and ak.
+In most cases, it's impossible to determine ideal values, but see suggestions provided above, and remember that SCSPSA will try to improve your guess for ak.
 
-However if parameter is very insensitive ELO-wise, one needs to use a larger value for ck.
-Also if one has even some sort of idea about the ELO-sensitivity of the parameter and how far from optimum
-it might be at maximum, one can use the built-in simulator, to find good values for Rk and ck.
-See files 'simul_1var.conf' and 'simul_1var.var' as an example.
+However, if a parameter is very insensitive ELO-wise, one needs to use a larger value for ck.
+
+Unfortunately, the built-in simulator do not work for this version so far.
