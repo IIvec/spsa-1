@@ -67,10 +67,13 @@ my $VAR_NAME      = 0; # Name
 my $VAR_START     = 1; # Start Value (theta_0)
 my $VAR_MIN       = 2; # Minimum allowed value
 my $VAR_MAX       = 3; # Maximum allowed value
-my $VAR_C         = 4; # c
+my $VAR_C_END     = 4; # c in the last iteration
 my $VAR_A         = 5; # a
 my $VAR_SIMUL_ELO = 6; # Simulation: Elo loss from 0 (optimum) to +-100)
 my $VAR_END       = 7; # Nothing
+
+# Extra calculated COLUMNS (SPSA paramters)
+my $VAR_C         = 7; # c
 
 ### SECTION. Variable definitions. (Static data during execution)
 my @variables;
@@ -133,11 +136,17 @@ sub read_csv
         die "Invalid current: '$row->[$VAR_START]'"           if ($row->[$VAR_START]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid max: '$row->[$VAR_MAX]'"                 if ($row->[$VAR_MAX]       !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid min: '$row->[$VAR_MIN]'"                 if ($row->[$VAR_MIN]       !~ /^[-+]?[0-9]*\.?[0-9]+$/);
-        die "Invalid c: '$row->[$VAR_C]'"            
-if ($row->[$VAR_C]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
+        die "Invalid c end: '$row->[$VAR_C_END]'"            
+if ($row->[$VAR_C_END]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid a: '$row->[$VAR_A]'"           
 if ($row->[$VAR_A]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid simul ELO: '$row->[$VAR_SIMUL_ELO]'"     if ($row->[$VAR_SIMUL_ELO] !~ /^[-+]?[0-9]*\.?[0-9]+$/);
+    }
+
+    # STEP. Calculate SPSA parameters for each variable.
+    foreach $row (@variables)
+    {
+        $row->[$VAR_C]       = $row->[$VAR_C_END] * sqrt($iterations) / exp(2.0);
     }
 
     # STEP. Create variable index for easy access.
@@ -245,20 +254,19 @@ sub run_spsa
 
                  if ($iter > $A + 1 && ($iter - 1) % $A == 0){
                       $var_prog2{$name} = abs($var_value{$name} - $var_temp{$name});
-                      $R{$name} = ($var_prog1{$name} > 0.001 ? $var_prog2{$name} / $var_prog1{$name} : -1.0);
+                      $R{$name} = ($var_prog1{$name} > 0.001 ? $var_prog2{$name} / ($corr{$name} * $var_prog1{$name}) : -1.0);
 
-                      if ($R{$name} > 1.0e-6 && $R{$name} < 0.999999) {$corr{$name} = min(2.0, max(0.5, -$A / (2.0 * $iterations * log($R{$name}))));} 
-                      if ($R{$name} <= 1.0e-6) {$corr{$name} = 0.5;}
-                      if ($R{$name} >= 0.999999) {$corr{$name} = 2.0;}
+                      if ($R{$name} > 1.0e-6 && $R{$name} < 0.999999) {$corr{$name} = min(1.25, max(0.8, -2.0 * $A / ($iterations * log($R{$name}))));} 
+                      if ($R{$name} <= 1.0e-6) {$corr{$name} = 0.8;}
+                      if ($R{$name} >= 0.999999) {$corr{$name} = 1.25;}
                       if ($R{$name} == -1.0) {$corr{$name} = 1.0;}
 
                       $var_a{$name} = $var_a{$name} * $corr{$name};
-                      $var_c0{$name} = $var_c0{$name} * $corr{$name};
                       $var_prog1{$name} = $var_prog2{$name};
                       $var_temp{$name} = $var_value{$name};            
                  }
 
-                 $var_c{$name}      = $var_c0{$name} * exp($iter / (2.0 * $iterations)) / sqrt($iter);
+                 $var_c{$name}      = $var_c0{$name} * exp(2.0 * $iter / $iterations) / sqrt($iter);
                  $var_delta{$name}  = int(rand(2)) ? 1 : -1;
 
                  $var_eng1{$name} = min(max($var_value{$name} + $var_c{$name} * $var_delta{$name}, $var_min{$name}), $var_max{$name});
