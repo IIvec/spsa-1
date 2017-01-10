@@ -52,7 +52,7 @@ theta := theta + ak * match(thetaplus, thetaminus) / (ck * delta)
 
 SCSPSA starts with constant value for ak, and then try to adjust it after 2A, 3A, 4A, ... iterations (see parameter A in aggr.conf). You can experiment, but I recommend to start with A = N / 8, where N is total number of iterations.
 
-SCSPSA tries to recognize whether theta is approaching an optimum in desired number of iterations. If progress is too fast, SCSPSA assumes that theta is far away from an optimum, and tries to increase ak further (by at most 25% to handle statistical errors). If progress is too slow, SCSPSA assumes that theta is close to an optimum, and decreases ak (by at most 25%).
+SCSPSA tries to recognize whether theta is approaching an optimum in desired number of iterations. If progress is too fast, SCSPSA assumes that theta is far away from an optimum, and tries to increase ak further (by at most 25% to handle statistical errors). If progress is too slow, SCSPSA assumes that theta is close to an optimum, and decreases ak (by at most 20%).
 
 A good starting point for ak is given by the formula:
 
@@ -66,7 +66,7 @@ ck = c0 * exp(2 * k / N) / sqrt(k),
 
 to fight against statistical errors and to avoid oscillations around an optimum. In CSV-file (see below) we prescribe "ck" for the last iteration and a good guess is given by the formula:
 
-ck = theta0 / 4.
+ck = theta0 / 3.
 
 If theta0 is close to zero, make your own guess, or try to rescale it. 
 
