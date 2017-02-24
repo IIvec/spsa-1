@@ -50,28 +50,30 @@ theta := theta + ak * ghat
 <=>
 theta := theta + ak * match(thetaplus, thetaminus) / (ck * delta)
 
-SCSPSA starts with constant value for ak, and then try to adjust it after 2A, 3A, 4A, ... iterations (see parameter A in aggr.conf). You can experiment, but I recommend to start with A = N / 8, where N is total number of iterations.
+SCSPSA starts with constant value for ak, and then try to adjust it after 2A, 3A, 4A, ... iterations (see parameter A in aggr.conf). You can experiment, but I recommend to start with A = max(8000, N / 8), where N is total number of iterations.
 
 SCSPSA tries to recognize whether theta is approaching an optimum in desired number of iterations. If progress is too fast, SCSPSA assumes that theta is far away from an optimum, and tries to increase ak further (by at most 25% to handle statistical errors). If progress is too slow, SCSPSA assumes that theta is close to an optimum, and decreases ak (by at most 20%).
 
-A good starting point for ak is given by the formula:
+A good starting point for ak (obtained by the built-in simulator) is given by the formula:
 
-ak = 2 * theta0 * theta0 / N,
+ak = 120 * dx * dx / N,
 
-whera theta0 is initial value for theta, while N is total number of iterations.
+where dx is the difference between an initial value for theta and an optimal value for theta, while N is total number of iterations. Of course, dx will be your guess.
 
 ck values will first decrease, and then increase by:
 
 ck = c0 * exp(2 * k / N) / sqrt(k),
 
-to fight against statistical errors and to avoid oscillations around an optimum. In CSV-file (see below) we prescribe "ck" for the last iteration and a good guess is given by the formula:
+to fight against statistical errors and to avoid oscillations around an optimum. In CSV-file (see below) we prescribe "ck" for the last iteration and a good guess (obtained by the built-in simulator) is given by the formula:
 
-ck = theta0 / 3.
+ck = 2 * dx,
 
-If theta0 is close to zero, make your own guess, or try to rescale it. 
+where dx is described above. Particularly, you can use
+
+ak = 30 * ck * ck / N.
 
 This way, SCSPSA tries to be both GLOBAL tuner and LOCAL tuner.
-Of course, for fine local tuning one needs big number of iterations.
+Of course, for fine local tuning one needs big number of iterations. In general, 40000 iterations is a pretty good choice (obtained by the built-in simulator) if you have chosen other parameters well. More than 100000 iterations is so far wasting of resources.
 
 3. Configuration file
 =====================
@@ -91,7 +93,7 @@ Column 2: Variable minimum value (float)
 Column 3: Variable maximum value (float)
 Column 4: Perturbation "ck" for the last iteration (float)
 Column 5: Initial apply factor "ak" (float)
-Column 6: use 0.0 (simulation mode do not work so far).
+Column 6: For simulation mode, this defines the ELO decrease for point x = (+/-) 100 compared to point x = 0 (optimum) (float).
 
 Notes: 
 - When ck is defined for the last iteration and the number of iterations is known, it's easy to derive a value for ck for any iteration.
@@ -123,4 +125,6 @@ In most cases, it's impossible to determine ideal values, but see suggestions pr
 
 However, if a parameter is very insensitive ELO-wise, one needs to use a larger value for ck.
 
-Unfortunately, the built-in simulator do not work for this version so far.
+Also if one has even some sort of idea about the ELO-sensitivity of the parameter and how far from optimum
+it might be at maximum, one can use the built-in simulator, to find good values for Rk and ck.
+See files 'simul.conf' and 'simul.var' as an example.
