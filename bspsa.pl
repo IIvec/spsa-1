@@ -1,14 +1,14 @@
 #!/usr/bin/perl
 
-# SPSA Tuner
+# BSPSA Tuner
 # Copyright (C) 2009-2014 Joona Kiiski 2016- Ivan Ivec
 #
-# SPSA Tuner is free software: you can redistribute it and/or modify
+# BSPSA Tuner is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# SPSA Tuner is distributed in the hope that it will be useful,
+# BSPSA Tuner is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
@@ -47,9 +47,8 @@ my $variables_path = $Config->{Main}->{Variables} ; defined($variables_path) || 
 my $log_path       = $Config->{Main}->{Log}       ; defined($log_path)       || die "Log not defined!";;
 my $gamelog_path   = $Config->{Main}->{GameLog}   ; defined($gamelog_path)   || die "GameLog not defined!";;
 my $iterations     = $Config->{Main}->{Iterations}; defined($iterations)     || die "Iterations not defined!";;
-my $A              = $Config->{Main}->{A}         ; defined($A)              || die "A not defined!";
 my $gamma          = $Config->{Main}->{Gamma}     ; defined($gamma)          || die "Gamma not defined!";
-my $alpha          = $Config->{Main}->{Alpha}     ; defined($alpha)          || die "Alpha not defined!";
+my $tau            = $Config->{Main}->{Tau}     ; defined($tau  )          || die "Tau not defined!";
 
 my $eng1_path        = $Config->{Engine}->{Engine1}        ; defined($eng1_path)        || $simulate || die "Engine1 not defined!";
 my $eng2_path        = $Config->{Engine}->{Engine2}        ; defined($eng2_path)        || $simulate || die "Engine2 not defined!";
@@ -70,14 +69,13 @@ my $VAR_START     = 1; # Start Value (theta_0)
 my $VAR_MIN       = 2; # Minimum allowed value
 my $VAR_MAX       = 3; # Maximum allowed value
 my $VAR_C_END     = 4; # c in the last iteration
-my $VAR_R_END     = 5; # R in the last iteration. R = a / c ^ 2.
-my $VAR_SIMUL_ELO = 6; # Simulation: Elo loss from 0 (optimum) to +-100)
-my $VAR_END       = 7; # Nothing
+my $VAR_S         = 5; # Initial standard deviation
+my $VAR_SIGMA     = 6; # Strength standard deviation
+my $VAR_SIMUL_ELO = 7; # Simulation: Elo loss from 0 (optimum) to +-100)
+my $VAR_END       = 8; # Nothing
 
-# Extra calculated COLUMNS (SPSA paramters)
-my $VAR_C         = 7; # c
-my $VAR_A_END     = 8; # a in the last iteration
-my $VAR_A         = 9; # a
+# Extra calculated COLUMNS (BSPSA paramters)
+my $VAR_C         = 8; # c
 
 ### SECTION. Variable definitions. (Static data during execution)
 my @variables;
@@ -90,6 +88,8 @@ local (*LOG);
 my $shared_lock      :shared;
 my $shared_iter      :shared; # Iteration counter
 my %shared_theta     :shared; # Current values by variable name
+my %var_temp         :shared; # Copy of the current values by variable name for an update purpose
+my %shared_s         :shared; # Current standard deviations by variable name
 
 ### SECTION. Helper functions
 
@@ -133,7 +133,10 @@ sub read_csv
         die "Invalid max: '$row->[$VAR_MAX]'"                 if ($row->[$VAR_MAX]       !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid min: '$row->[$VAR_MIN]'"                 if ($row->[$VAR_MIN]       !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid c end: '$row->[$VAR_C_END]'"             if ($row->[$VAR_C_END]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
-        die "Invalid r end: '$row->[$VAR_R_END]'"             if ($row->[$VAR_R_END]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
+        die "Invalid s: '$row->[$VAR_S]'"             
+if ($row->[$VAR_S]         !~ /^[-+]?[0-9]*\.?[0-9]+$/);
+        die "Invalid sigma: '$row->[$VAR_SIGMA]'"             
+if ($row->[$VAR_SIGMA]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid simul ELO: '$row->[$VAR_SIMUL_ELO]'"     if ($row->[$VAR_SIMUL_ELO] !~ /^[-+]?[0-9]*\.?[0-9]+$/);
     }
 
@@ -141,8 +144,6 @@ sub read_csv
     foreach $row (@variables)
     {
         $row->[$VAR_C]       = $row->[$VAR_C_END] * $iterations ** $gamma; 
-        $row->[$VAR_A_END]   = $row->[$VAR_R_END] * $row->[$VAR_C_END] ** 2;
-        $row->[$VAR_A]       = $row->[$VAR_A_END] * ($A + $iterations) ** $alpha;
     }
 
     # STEP. Create variable index for easy access.
@@ -156,7 +157,9 @@ sub read_csv
     
     foreach $row (@variables)
     {
-        $shared_theta{$row->[$VAR_NAME]} = $row->[$VAR_START];    
+        $shared_theta{$row->[$VAR_NAME]} = $row->[$VAR_START];
+        $var_temp{$row->[$VAR_NAME]} = $row->[$VAR_START]; 
+        $shared_s{$row->[$VAR_NAME]} = $row->[$VAR_S];      
     }
 
     # STEP. Launch SPSA threads
@@ -211,7 +214,7 @@ sub run_spsa
     while(1)
     {
         # SPSA coefficients indexed by variable.
-        my (%var_value, %var_min, %var_max, %var_a, %var_c, %var_R, %var_delta, %var_eng1, %var_eng2);
+        my (%var_value, %var_min, %var_max, %var_c, %var_s, %var_delta, %var_eng1, %var_eng2);
         my $iter; 
 
         {
@@ -232,17 +235,17 @@ sub run_spsa
                  my $name  = $row->[$VAR_NAME];
 
                  $var_value{$name}  = $shared_theta{$name};
+                 $var_temp{$name}   = $shared_theta{$name};
                  $var_min{$name}    = $row->[$VAR_MIN];
                  $var_max{$name}    = $row->[$VAR_MAX];
-                 $var_a{$name}      = $row->[$VAR_A] / ($A + $iter) ** $alpha;
                  $var_c{$name}      = $row->[$VAR_C] / $iter ** $gamma;
-                 $var_R{$name}      = $var_a{$name} / $var_c{$name} ** 2;
+                 $var_s{$name}      = $shared_s{$name};
                  $var_delta{$name}  = int(rand(2)) ? 1 : -1;
 
                  $var_eng1{$name} = min(max($var_value{$name} + $var_c{$name} * $var_delta{$name}, $var_min{$name}), $var_max{$name});
                  $var_eng2{$name} = min(max($var_value{$name} - $var_c{$name} * $var_delta{$name}, $var_min{$name}), $var_max{$name});
 
-                 print "Iteration: $iter, variable: $name, value: $var_value{$name}, a: $var_a{$name}, c: $var_c{$name}, R: $var_R{$name}\n";
+                 print "Iteration: $iter, variable: $name, value: $var_value{$name}, c: $var_c{$name}, s: $var_s{$name}\n";
              }
         }
 
