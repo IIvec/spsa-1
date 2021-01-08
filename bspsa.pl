@@ -48,7 +48,7 @@ my $log_path       = $Config->{Main}->{Log}       ; defined($log_path)       || 
 my $gamelog_path   = $Config->{Main}->{GameLog}   ; defined($gamelog_path)   || die "GameLog not defined!";;
 my $iterations     = $Config->{Main}->{Iterations}; defined($iterations)     || die "Iterations not defined!";;
 my $gamma          = $Config->{Main}->{Gamma}     ; defined($gamma)          || die "Gamma not defined!";
-my $tau            = $Config->{Main}->{Tau}     ; defined($tau  )          || die "Tau not defined!";
+my $tau            = $Config->{Main}->{Tau}       ; defined($tau  )          || die "Tau not defined!";
 
 my $eng1_path        = $Config->{Engine}->{Engine1}        ; defined($eng1_path)        || $simulate || die "Engine1 not defined!";
 my $eng2_path        = $Config->{Engine}->{Engine2}        ; defined($eng2_path)        || $simulate || die "Engine2 not defined!";
