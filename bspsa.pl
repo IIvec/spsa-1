@@ -269,7 +269,7 @@ sub run_spsa
                 {
                     my $name2  = $row->[$VAR_NAME];
 
-                    if ($name2 != $name) 
+                    if ($name2 ne $name) 
                     {
                         $shared_theta{$name} += 2 * $var_delta{$name} * $var_delta{$name2} * $var_c{$name} * $var_c{$name2} * ($var_s{$name} ** 2) * ($var_sigma{$name} ** 2) * $var_temp{$name2} / (($var_sigma{$name2} ** 2) * $denom);  
                     } 
