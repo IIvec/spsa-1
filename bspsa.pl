@@ -214,7 +214,7 @@ sub run_spsa
     while(1)
     {
         # SPSA coefficients indexed by variable.
-        my (%var_value, %var_min, %var_max, %var_c, %var_s, %var_delta, %var_eng1, %var_eng2);
+        my (%var_value, %var_min, %var_max, %var_c, %var_s, %var_sigma, %var_delta, %var_eng1, %var_eng2);
         my $iter; 
 
         {
@@ -240,6 +240,7 @@ sub run_spsa
                  $var_max{$name}    = $row->[$VAR_MAX];
                  $var_c{$name}      = $row->[$VAR_C] / $iter ** $gamma;
                  $var_s{$name}      = $shared_s{$name};
+                 $var_sigma{$name}  = $row->[$VAR_SIGMA];
                  $var_delta{$name}  = int(rand(2)) ? 1 : -1;
 
                  $var_eng1{$name} = min(max($var_value{$name} + $var_c{$name} * $var_delta{$name}, $var_min{$name}), $var_max{$name});
@@ -260,9 +261,20 @@ sub run_spsa
 
             foreach $row (@variables)
             {
-                my $name = $row->[$VAR_NAME];
+                my $name  = $row->[$VAR_NAME];
+                my $denom = 4 * ($var_c{$name} ** 2) * ($var_s{$name} ** 2) + ($tau ** 2) * ($var_sigma{$name} ** 4);     
 
-                $shared_theta{$name} += $var_R{$name} * $var_c{$name} * $result / $var_delta{$name};
+                $shared_theta{$name} += 2 * $var_delta{$name} * $var_c{$name} * ($var_s{$name} ** 2) * ($var_sigma{$name} ** 2) * $result / $denom;
+                foreach $row (@variables)
+                {
+                    my $name2  = $row->[$VAR_NAME];
+
+                    if ($name2 != $name) 
+                    {
+                        $shared_theta{$name} += 2 * $var_delta{$name} * $var_delta{$name2} * $var_c{$name} * $var_c{$name2} * ($var_s{$name} ** 2) * ($var_sigma{$name} ** 2) * $var_temp{$name2} / (($var_sigma{$name2} ** 2) * $denom);  
+                    } 
+                }
+                $shared_s{$name} = sqrt(($var_s{$name} ** 2) * ($tau ** 2) * ($var_sigma{$name} ** 4) / $denom);
                 $shared_theta{$name} = max(min($shared_theta{$name}, $var_max{$name}), $var_min{$name});
                 
                 $logLine .= ",$shared_theta{$name}";
