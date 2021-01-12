@@ -88,7 +88,6 @@ local (*LOG);
 my $shared_lock      :shared;
 my $shared_iter      :shared; # Iteration counter
 my %shared_theta     :shared; # Current values by variable name
-my %var_temp         :shared; # Copy of the current values by variable name for an update purpose
 my %shared_s         :shared; # Current standard deviations by variable name
 
 ### SECTION. Helper functions
@@ -157,8 +156,7 @@ if ($row->[$VAR_SIGMA]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
     
     foreach $row (@variables)
     {
-        $shared_theta{$row->[$VAR_NAME]} = $row->[$VAR_START];
-        $var_temp{$row->[$VAR_NAME]} = $row->[$VAR_START]; 
+        $shared_theta{$row->[$VAR_NAME]} = $row->[$VAR_START]; 
         $shared_s{$row->[$VAR_NAME]} = $row->[$VAR_S];      
     }
 
@@ -235,7 +233,6 @@ sub run_spsa
                  my $name  = $row->[$VAR_NAME];
 
                  $var_value{$name}  = $shared_theta{$name};
-                 $var_temp{$name}   = $shared_theta{$name};
                  $var_min{$name}    = $row->[$VAR_MIN];
                  $var_max{$name}    = $row->[$VAR_MAX];
                  $var_c{$name}      = $row->[$VAR_C] / $iter ** $gamma;
@@ -271,7 +268,7 @@ sub run_spsa
 
                     if ($name2 ne $name) 
                     {
-                        $shared_theta{$name} += 2 * $var_delta{$name} * $var_delta{$name2} * $var_c{$name} * $var_c{$name2} * ($var_s{$name} ** 2) * ($var_sigma{$name} ** 2) * $var_temp{$name2} / (($var_sigma{$name2} ** 2) * $denom);  
+                        $shared_theta{$name} += 2 * $var_delta{$name} * $var_delta{$name2} * $var_c{$name} * $var_c{$name2} * ($var_s{$name} ** 2) * ($var_sigma{$name} ** 2) * $var_value{$name2} / (($var_sigma{$name2} ** 2) * $denom);  
                     } 
                 }
                 $shared_s{$name} = sqrt(($var_s{$name} ** 2) * ($tau ** 2) * ($var_sigma{$name} ** 4) / $denom);
