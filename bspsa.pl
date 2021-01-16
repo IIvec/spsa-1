@@ -320,7 +320,10 @@ sub run_spsa
                         {
                             my $name2 = $row->[$VAR_NAME];
 
-							$var_s{$name}{$name2} -= $corr * $var_s{$name3}{$name2};
+							if ($var_s{$name3}{$name2} != 0)
+							{
+							    $var_s{$name}{$name2} -= $corr * $var_s{$name3}{$name2};
+							}
                         } 
 						$var_A{$name} -= $corr * $var_A{$name3};
 					}
