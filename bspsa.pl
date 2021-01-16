@@ -284,11 +284,11 @@ sub run_spsa
 
 			foreach $row (@variables)
             {
-                my $name  = $row->[$VAR_NAME];
+                my $name = $row->[$VAR_NAME];
                 
                 foreach $row (@variables)
                 {
-                    my $name2  = $row->[$VAR_NAME];
+                    my $name2 = $row->[$VAR_NAME];
 
                     if ($name2 eq $name) 
                     {
@@ -307,20 +307,28 @@ sub run_spsa
 
             foreach $row (@variables)
             {
-                my $name  = $row->[$VAR_NAME];
+                my $name3 = $row->[$VAR_NAME];
                 
                 foreach $row (@variables)
                 {
-                    my $name2  = $row->[$VAR_NAME];
+                    my $name = $row->[$VAR_NAME];
+					my $corr = $var_s{$name}{$name3} / $var_s{$name3}{$name3};
 
-                    if ($name2 ne $name) 
-                    {
-                         
-                    } 
+					if ($name ne $name3)
+					{
+                        foreach $row (@variables) 
+                        {
+                            my $name2 = $row->[$VAR_NAME];
+
+							$var_s{$name}{$name2} -= $corr * $var_s{$name3}{$name2};
+                        } 
+						$var_A{$name} -= $corr * $var_A{$name3};
+					}
                 }
-                $shared_theta{$name} = max(min($shared_theta{$name}, $var_max{$name}), $var_min{$name});
+				$shared_theta{$name3} += $var_A{$name3} * $result / ($var_s{$name3}{$name3} * $tau ** 2);
+                $shared_theta{$name3} = max(min($shared_theta{$name3}, $var_max{$name3}), $var_min{$name3});
                 
-                $logLine .= ",$shared_theta{$name}";
+                $logLine .= ",$shared_theta{$name3}";
             }
 
             print LOG "$logLine\n"
