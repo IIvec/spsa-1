@@ -88,8 +88,7 @@ local (*LOG);
 my $shared_lock      :shared;
 my $shared_iter      :shared; # Iteration counter
 my %shared_theta     :shared; # Current values by variable name
-my %shared_t         :shared; # Current standard deviations by variable name
-my %shared_s         :shared; # Current matrix
+my %shared_s         :shared; # Current inverse of the covariance matrix
 
 ### SECTION. Helper functions
 
@@ -165,7 +164,6 @@ if ($row->[$VAR_SIGMA]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
     {
         my $name = $row->[$VAR_NAME];
         $shared_theta{$name} = $row->[$VAR_START];
-        $shared_t{$name} = $row->[$VAR_S];
 
         foreach $row (@variables)
         {
@@ -178,8 +176,6 @@ if ($row->[$VAR_SIGMA]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
             {      
                 $shared_s{$name}{$name2}  = 0;
             } 
-
-            print "$shared_s{$name}{$name2}\n";
         }      
     }
 
@@ -235,7 +231,7 @@ sub run_spsa
     while(1)
     {
         # SPSA coefficients indexed by variable.
-        my (%var_value, %var_min, %var_max, %var_c, %var_t, %var_sigma, %var_delta, %var_eng1, %var_eng2);
+        my (%var_value, %var_min, %var_max, %var_c, %var_s, %var_sigma, %var_delta, %var_A, %var_eng1, %var_eng2);
         my $iter; 
 
         {
@@ -259,14 +255,19 @@ sub run_spsa
                  $var_min{$name}    = $row->[$VAR_MIN];
                  $var_max{$name}    = $row->[$VAR_MAX];
                  $var_c{$name}      = $row->[$VAR_C] / $iter ** $gamma;
-                 $var_t{$name}      = $shared_t{$name};
+				 foreach $row (@variables)
+                 {
+                     my $name2  = $row->[$VAR_NAME];
+					 $var_s{$name}{$name2} = $shared_s{$name}{$name2};
+				 }
                  $var_sigma{$name}  = $row->[$VAR_SIGMA];
                  $var_delta{$name}  = int(rand(2)) ? 1 : -1;
+				 $var_A{$name}      = 2 * $var_delta{$name} * $var_c{$name} / $var_sigma{$name} ** 2;
 
                  $var_eng1{$name} = min(max($var_value{$name} + $var_c{$name} * $var_delta{$name}, $var_min{$name}), $var_max{$name});
                  $var_eng2{$name} = min(max($var_value{$name} - $var_c{$name} * $var_delta{$name}, $var_min{$name}), $var_max{$name});
 
-                 print "Iteration: $iter, variable: $name, value: $var_value{$name}, c: $var_c{$name}, s: $var_t{$name}\n";
+                 print "Iteration: $iter, variable: $name, value: $var_value{$name}, c: $var_c{$name}, s: ", sqrt(1 / $var_s{$name}{$name}), "\n";
              }
         }
 
@@ -279,22 +280,44 @@ sub run_spsa
 
             my $logLine = "$iter";
 
+			# Update the inverse of covariance matrix
+
+			foreach $row (@variables)
+            {
+                my $name  = $row->[$VAR_NAME];
+                
+                foreach $row (@variables)
+                {
+                    my $name2  = $row->[$VAR_NAME];
+
+                    if ($name2 eq $name) 
+                    {
+                        $shared_s{$name}{$name2} += ($var_A{$name} / $tau) ** 2;  
+						$var_s{$name}{$name2} = $shared_s{$name}{$name2};
+                    } 
+					else
+					{
+					    $shared_s{$name}{$name2} += $var_A{$name} * $var_A{$name2} / $tau ** 2;  
+						$var_s{$name}{$name2} = $shared_s{$name}{$name2};
+					}
+                }
+            }
+
+			# Update parameters by Gauss-Jordan eliminations
+
             foreach $row (@variables)
             {
                 my $name  = $row->[$VAR_NAME];
-                my $denom = 4 * ($var_c{$name} ** 2) * ($var_t{$name} ** 2) + ($tau ** 2) * ($var_sigma{$name} ** 4);     
-
-                $shared_theta{$name} += 2 * $var_delta{$name} * $var_c{$name} * ($var_t{$name} ** 2) * ($var_sigma{$name} ** 2) * $result / $denom;
+                
                 foreach $row (@variables)
                 {
                     my $name2  = $row->[$VAR_NAME];
 
                     if ($name2 ne $name) 
                     {
-                        $shared_theta{$name} += 2 * $var_delta{$name} * $var_delta{$name2} * $var_c{$name} * $var_c{$name2} * ($var_t{$name} ** 2) * ($var_sigma{$name} ** 2) * $var_value{$name2} / (($var_sigma{$name2} ** 2) * $denom);  
+                         
                     } 
                 }
-                $shared_t{$name} = sqrt(($var_t{$name} ** 2) * ($tau ** 2) * ($var_sigma{$name} ** 4) / $denom);
                 $shared_theta{$name} = max(min($shared_theta{$name}, $var_max{$name}), $var_min{$name});
                 
                 $logLine .= ",$shared_theta{$name}";
