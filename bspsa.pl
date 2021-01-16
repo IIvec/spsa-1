@@ -88,7 +88,8 @@ local (*LOG);
 my $shared_lock      :shared;
 my $shared_iter      :shared; # Iteration counter
 my %shared_theta     :shared; # Current values by variable name
-my %shared_s         :shared; # Current standard deviations by variable name
+my %shared_t         :shared; # Current standard deviations by variable name
+my %shared_s         :shared; # Current matrix
 
 ### SECTION. Helper functions
 
@@ -139,6 +140,12 @@ if ($row->[$VAR_SIGMA]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
         die "Invalid simul ELO: '$row->[$VAR_SIMUL_ELO]'"     if ($row->[$VAR_SIMUL_ELO] !~ /^[-+]?[0-9]*\.?[0-9]+$/);
     }
 
+	# STEP. Share the hash of hashes
+	foreach $row (@variables)
+    {
+        $shared_s{$row->[$VAR_NAME]} = &share({});
+    }
+
     # STEP. Calculate SPSA parameters for each variable.
     foreach $row (@variables)
     {
@@ -156,8 +163,24 @@ if ($row->[$VAR_SIGMA]     !~ /^[-+]?[0-9]*\.?[0-9]+$/);
     
     foreach $row (@variables)
     {
-        $shared_theta{$row->[$VAR_NAME]} = $row->[$VAR_START]; 
-        $shared_s{$row->[$VAR_NAME]} = $row->[$VAR_S];      
+        my $name = $row->[$VAR_NAME];
+        $shared_theta{$name} = $row->[$VAR_START];
+        $shared_t{$name} = $row->[$VAR_S];
+
+        foreach $row (@variables)
+        {
+            my $name2 = $row->[$VAR_NAME];
+            if ($name2 eq $name)
+            {
+                $shared_s{$name}{$name2} = 1 / $row->[$VAR_S] ** 2;
+            }
+            else
+            {      
+                $shared_s{$name}{$name2}  = 0;
+            } 
+
+            print "$shared_s{$name}{$name2}\n";
+        }      
     }
 
     # STEP. Launch SPSA threads
@@ -212,7 +235,7 @@ sub run_spsa
     while(1)
     {
         # SPSA coefficients indexed by variable.
-        my (%var_value, %var_min, %var_max, %var_c, %var_s, %var_sigma, %var_delta, %var_eng1, %var_eng2);
+        my (%var_value, %var_min, %var_max, %var_c, %var_t, %var_sigma, %var_delta, %var_eng1, %var_eng2);
         my $iter; 
 
         {
@@ -236,14 +259,14 @@ sub run_spsa
                  $var_min{$name}    = $row->[$VAR_MIN];
                  $var_max{$name}    = $row->[$VAR_MAX];
                  $var_c{$name}      = $row->[$VAR_C] / $iter ** $gamma;
-                 $var_s{$name}      = $shared_s{$name};
+                 $var_t{$name}      = $shared_t{$name};
                  $var_sigma{$name}  = $row->[$VAR_SIGMA];
                  $var_delta{$name}  = int(rand(2)) ? 1 : -1;
 
                  $var_eng1{$name} = min(max($var_value{$name} + $var_c{$name} * $var_delta{$name}, $var_min{$name}), $var_max{$name});
                  $var_eng2{$name} = min(max($var_value{$name} - $var_c{$name} * $var_delta{$name}, $var_min{$name}), $var_max{$name});
 
-                 print "Iteration: $iter, variable: $name, value: $var_value{$name}, c: $var_c{$name}, s: $var_s{$name}\n";
+                 print "Iteration: $iter, variable: $name, value: $var_value{$name}, c: $var_c{$name}, s: $var_t{$name}\n";
              }
         }
 
@@ -259,19 +282,19 @@ sub run_spsa
             foreach $row (@variables)
             {
                 my $name  = $row->[$VAR_NAME];
-                my $denom = 4 * ($var_c{$name} ** 2) * ($var_s{$name} ** 2) + ($tau ** 2) * ($var_sigma{$name} ** 4);     
+                my $denom = 4 * ($var_c{$name} ** 2) * ($var_t{$name} ** 2) + ($tau ** 2) * ($var_sigma{$name} ** 4);     
 
-                $shared_theta{$name} += 2 * $var_delta{$name} * $var_c{$name} * ($var_s{$name} ** 2) * ($var_sigma{$name} ** 2) * $result / $denom;
+                $shared_theta{$name} += 2 * $var_delta{$name} * $var_c{$name} * ($var_t{$name} ** 2) * ($var_sigma{$name} ** 2) * $result / $denom;
                 foreach $row (@variables)
                 {
                     my $name2  = $row->[$VAR_NAME];
 
                     if ($name2 ne $name) 
                     {
-                        $shared_theta{$name} += 2 * $var_delta{$name} * $var_delta{$name2} * $var_c{$name} * $var_c{$name2} * ($var_s{$name} ** 2) * ($var_sigma{$name} ** 2) * $var_value{$name2} / (($var_sigma{$name2} ** 2) * $denom);  
+                        $shared_theta{$name} += 2 * $var_delta{$name} * $var_delta{$name2} * $var_c{$name} * $var_c{$name2} * ($var_t{$name} ** 2) * ($var_sigma{$name} ** 2) * $var_value{$name2} / (($var_sigma{$name2} ** 2) * $denom);  
                     } 
                 }
-                $shared_s{$name} = sqrt(($var_s{$name} ** 2) * ($tau ** 2) * ($var_sigma{$name} ** 4) / $denom);
+                $shared_t{$name} = sqrt(($var_t{$name} ** 2) * ($tau ** 2) * ($var_sigma{$name} ** 4) / $denom);
                 $shared_theta{$name} = max(min($shared_theta{$name}, $var_max{$name}), $var_min{$name});
                 
                 $logLine .= ",$shared_theta{$name}";
